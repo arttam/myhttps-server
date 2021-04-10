@@ -14,10 +14,16 @@ class Parser
     std::string requestType_;
     std::string requestPath_;
     std::unordered_map<std::string, std::string> headers_;
+
 public:
     explicit Parser(const std::string& root);
 
-    std::pair<bool, std::variant<std::string, std::vector<uint8_t>>> parse(std::pair<std::string, std::string>&& request);
+    std::pair<std::string, std::variant<std::string, std::vector<uint8_t>>> parse(std::pair<std::string, std::string>&& request);
+
+private:
+    // pair: header, body
+    std::pair<std::string, std::string> buildErrorRespnose(int errorCode, const std::string& errorStr, const std::string& message) const;
+    std::string buildHeader(int contentLength, const std::string& contentType=std::string{"text/html"}, int code=200, const std::string& status=std::string{"OK"}) const;
 };
 
 #endif

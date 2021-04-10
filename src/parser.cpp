@@ -1,6 +1,7 @@
 #include "parser.h"
 #include <cstring>
 #include <fstream>
+#include <sstream>
 
 // debug
 #include <iostream>
@@ -37,7 +38,7 @@ Parser::Parser(const std::string& root)
 
 }
 
-std::pair<bool, std::variant<std::string, std::vector<uint8_t>>> Parser::parse(std::pair<std::string, std::string>&& request)
+std::pair<std::string, std::variant<std::string, std::vector<uint8_t>>> Parser::parse(std::pair<std::string, std::string>&& request)
 {
     bool parseResult{false};
     // First line - request type
@@ -60,13 +61,13 @@ std::pair<bool, std::variant<std::string, std::vector<uint8_t>>> Parser::parse(s
                                 (std::istreambuf_iterator<char>(ifs)),
                                 (std::istreambuf_iterator<char>()));
 
-                        return std::make_pair(true, fileContents);
+                        return std::make_pair(buildHeader(fileContents.length(), mimeType), fileContents);
                     }
                     else {
                         std::string errorStr{"Cannot read: "};
                         errorStr += requestPath_;
                         
-                        return std::make_pair(false, errorStr);
+                        return buildErrorRespnose(404, "Not found", errorStr);
                     }
                 }
                 else {
@@ -79,18 +80,18 @@ std::pair<bool, std::variant<std::string, std::vector<uint8_t>>> Parser::parse(s
                         std::vector<uint8_t> buffer(fileSize);
                         if (ifs.read(reinterpret_cast<char*>(buffer.data()), fileSize)) {
                             std::cout << "Read successfully into vector " << buffer.size() << " bytes";
-                            return std::make_pair(true, buffer);
+                            return std::make_pair(buildHeader(buffer.size(), mimeType), buffer);
                         }
                         else {
                             std::string errorStr{"Failed to read data into buffer"};
-                            return std::make_pair(false, errorStr);
+                            return buildErrorRespnose(500, "Read error", errorStr);
                         }
                     }
                     else {
                         std::string errorStr{"Cannot read: "};
                         errorStr += requestPath_;
 
-                        return std::make_pair(parseResult, errorStr);
+                        return buildErrorRespnose(500, "Read error", errorStr);
                     }
                 }
             }
@@ -102,9 +103,45 @@ std::pair<bool, std::variant<std::string, std::vector<uint8_t>>> Parser::parse(s
             std::string errorStr{"File: "};
             errorStr += requestPath_;
             errorStr += " was not found";
-            return std::make_pair(parseResult, errorStr);
+
+            return buildErrorRespnose(404, "File not found", errorStr);
         }
     }
 
-    return std::make_pair(parseResult, std::vector<uint8_t>{});
+    return std::make_pair(buildHeader(0), std::vector<uint8_t>{});
+}
+
+std::pair<std::string, std::string> Parser::buildErrorRespnose(int errorCode, const std::string& errorStr, const std::string& message) const
+{
+    std::stringstream bsstr;
+    bsstr
+    << R"(<!doctype html>
+<html lang="en-gb">
+<head>
+<title>ERROR</title>
+</head>
+<body>
+<h3>)"
+    << message
+    << R"(</h3></body></html>)";
+
+    return std::make_pair(buildHeader(bsstr.str().length(), "text/html", errorCode, errorStr), bsstr.str());
+}
+
+std::string Parser::buildHeader(int contentLength, const std::string& contentType,  int code, const std::string& status) const
+{
+    std::stringstream hsstr;
+    hsstr 
+        << "HTTP/1.1 "
+        << code << " " << status
+        << R"(
+Server: Miki4
+Content-Type: )"
+        << contentType
+        << R"(
+Content-Length: )"
+        << contentLength
+        << "\r\n\r\n";
+   
+    return hsstr.str();
 }
