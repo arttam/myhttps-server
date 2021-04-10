@@ -67,5 +67,6 @@ std::vector<std::string> split_headers(const std::string& text);
 UP<BIO> accept_new_tcp_connection(BIO* accept_bio);
 std::pair<std::string, std::string> receive_http_message(BIO* bio);
 void send_http_response(BIO* bio, bool success, const std::string& body);
+void send_http_response(BIO* bio, bool success, const std::vector<u_int8_t>& body);
 
 #endif

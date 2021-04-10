@@ -2,6 +2,9 @@
 #include <cstring>
 #include "helpers.h"
 
+// Debug
+#include <iostream>
+
 UP<BIO> getUpper(UP<BIO> lower, UP<BIO> upper)
 {
     BIO_push(upper, lower.release());
@@ -90,6 +93,23 @@ std::pair<std::string, std::string> receive_http_message(BIO* bio)
 
 void send_http_response(BIO* bio, bool success, const std::string& body)
 {
+    std::string response = "HTTP/1.1 ";
+    response
+        .append((success ? "200 OK" : "500 Error"))
+        .append("\r\n");
+
+    response += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+    response += "\r\n";
+
+    BIO_write(bio, response.data(), response.size());
+    BIO_write(bio, body.data(), body.size());
+    BIO_flush(bio);
+}
+
+void send_http_response(BIO* bio, bool success, const std::vector<u_int8_t>& body)
+{
+    std::cout << "Sending actual vector" << std::endl;
+
     std::string response = "HTTP/1.1 ";
     response
         .append((success ? "200 OK" : "500 Error"))

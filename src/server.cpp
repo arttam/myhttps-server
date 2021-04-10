@@ -62,10 +62,15 @@ int main(int argc, char **argv)
             std::pair<std::string, std::string> request = receive_http_message(connectionBio);
 
             std::unique_ptr<Parser> pParser(new Parser(certFolder));
-            std::pair<bool, std::string> response = pParser->parse(std::move(request));
+            const auto [success, data] = pParser->parse(std::move(request));
 
             // Response
-            send_http_response(connectionBio, response.first, response.second);
+            if (std::holds_alternative<std::string>(data)) {
+                send_http_response(connectionBio, success, std::get<std::string>(data));
+            }
+            else {
+                send_http_response(connectionBio, success, std::get<std::vector<uint8_t>>(data));
+            }
         }
         catch (const std::exception& ex) {
             printf("Worker exited with exception:\n%s\n", ex.what());
