@@ -18,16 +18,33 @@ int main(int argc, char **argv)
 
     std::string port{argv[1]};
 
-    std::string certFolder{"./"};
+    // For now following docRoot structure expected:
+    // .
+    // ├── server-certificate.pem
+    // ├── server-private-key.pem
+    // ├── server-public-key.pem
+    // └── html
+    //     ├── favicon.ico
+    //     ├── miki.css
+    //     ├── miki.html
+    //     ├── miki.js
+    //     ├── miki.wasm
+    //     └── pages/
+
+    std::string certRoot{"./"};
+
+    // TODO: Do it nicely
     if (argc > 2) {
-        certFolder.assign(argv[2]);
+        certRoot.assign(argv[2]);
+        if (certRoot[certRoot.length() - 1] != '/')
+           certRoot += '/';
     }
 
     std::string certificatePath{"server-certificate.pem"};
     std::string privateKeyPath{"server-private-key.pem"};
 
-    certificatePath.insert(0, certFolder);
-    privateKeyPath.insert(0, certFolder);
+    certificatePath.insert(0, certRoot);
+    privateKeyPath.insert(0, certRoot);
 
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
     SSL_library_init();
@@ -61,7 +78,7 @@ int main(int argc, char **argv)
         try {
             std::pair<std::string, std::string> request = receive_http_message(connectionBio);
 
-            std::unique_ptr<Parser> pParser(new Parser(certFolder));
+            std::unique_ptr<Parser> pParser(new Parser(certRoot + "/html"));
             const auto [success, data] = pParser->parse(std::move(request));
 
             // Response
@@ -78,4 +95,5 @@ int main(int argc, char **argv)
     }
     printf("\nClean exit!\n");
 }
+
 

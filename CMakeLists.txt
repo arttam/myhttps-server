@@ -15,7 +15,8 @@ include_directories("md4c")
 file(GLOB SOURCES
     src/helpers.cpp
     src/server.cpp
-    src/parser.cpp)
+    src/parser.cpp
+    src/resource.cpp)
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 17)

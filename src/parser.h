@@ -10,13 +10,13 @@
 
 class Parser
 {
-    std::string siteRoot_;
+    std::string docRoot_;
     std::string requestType_;
     std::string requestPath_;
     std::unordered_map<std::string, std::string> headers_;
 
 public:
-    explicit Parser(const std::string& root);
+    explicit Parser(const std::string& docRoot);
 
     std::pair<std::string, std::variant<std::string, std::vector<uint8_t>>> parse(std::pair<std::string, std::string>&& request);
 

@@ -1,8 +1,10 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 
 // parser
+#include "resource.h"
 #include "parser.h"
 
 // md4c MD parser
@@ -37,10 +39,9 @@ const std::unordered_map<std::string, std::pair<const char*, bool>> MimeTypes{
     {".svg", {"image/svg+xml", false}},
     {".svgz", {"image/svg+xml", false}}};
 
-Parser::Parser(const std::string& root)
-    : siteRoot_(root)
+Parser::Parser(const std::string& docRoot)
+    : docRoot_(docRoot)
 {
-
 }
 
 std::pair<std::string, std::variant<std::string, std::vector<uint8_t>>> Parser::parse(std::pair<std::string, std::string>&& request)
@@ -53,17 +54,39 @@ std::pair<std::string, std::variant<std::string, std::vector<uint8_t>>> Parser::
     spacePtr = strchr(++spacePtr, ' ');
     requestPath_ = std::string(request.first.c_str() + requestType_.length() + 1, spacePtr);
 
+    // Validation
+    if (requestPath_.empty() || requestPath_[0] != '/' || requestPath_.find("..") != std::string::npos) {
+       std::string errorStr = "Invalid request: '" + requestPath_ + "'";
+       return buildErrorRespnose(400, "Invalid request", errorStr);
+    }
+
+    if (requestPath_ == "/") {
+       requestPath_ = "/miki.html";
+    }
+
+    std::filesystem::path pTarget(std::filesystem::current_path());
+    pTarget += "/";
+    pTarget += docRoot_;
+    pTarget += requestPath_;
+
+    // Debug
+    std::cout << "\nRelative request path: " << pTarget << std::endl;
+
+    if (!std::filesystem::exists(pTarget)) {
+       std::string errorStr = "Resource: " + requestPath_ + " was not found";
+       return buildErrorRespnose(404, "File not found", errorStr);
+    }
+
     if (requestType_ == "GET") {
-       requestPath_.insert(0, std::filesystem::current_path());
-       if (std::filesystem::exists(requestPath_) && std::filesystem::is_regular_file(requestPath_)) {
-          std::string extension = std::filesystem::path(requestPath_).extension();
+       if (std::filesystem::is_regular_file(pTarget)) {
+          std::string extension = std::filesystem::path(pTarget).extension();
           if (const auto mimeIt = MimeTypes.find(extension); mimeIt != MimeTypes.end()) {
              const auto [ext, typePair] = *mimeIt;
              const auto [mimeType, isText] = typePair;
              if (isText) {
                 // If markdown - we'll use md4c parser
                 if (ext == ".md") {
-                   if (std::ifstream ifs(requestPath_); ifs) {
+                   if (std::ifstream ifs(pTarget); ifs) {
                       std::string htmlIn(
                             (std::istreambuf_iterator<char>(ifs)),
                             std::istreambuf_iterator<char>());
@@ -94,12 +117,12 @@ std::pair<std::string, std::variant<std::string, std::vector<uint8_t>>> Parser::
                    }
                    else {
                       std::string errorStr{"Cannot read: "};
-                      errorStr += requestPath_;
+                      errorStr += pTarget;
 
                       return buildErrorRespnose(404, "Not found", errorStr);
                    }
                 }
-                else if (std::ifstream ifs(requestPath_); ifs) {
+                else if (std::ifstream ifs(pTarget); ifs) {
                    std::string fileContents(
                          (std::istreambuf_iterator<char>(ifs)),
                          (std::istreambuf_iterator<char>()));
@@ -108,13 +131,13 @@ std::pair<std::string, std::variant<std::string, std::vector<uint8_t>>> Parser::
                 }
                 else {
                    std::string errorStr{"Cannot read: "};
-                   errorStr += requestPath_;
+                   errorStr += pTarget;
 
                    return buildErrorRespnose(404, "Not found", errorStr);
                 }
              }
              else {
-                if (std::ifstream ifs(requestPath_, std::ios::in|std::ios::binary); ifs) {
+                if (std::ifstream ifs(pTarget, std::ios::in|std::ios::binary); ifs) {
                    ifs.unsetf(std::ios::skipws); // Stop eating new lines
                    ifs.seekg(0, std::ios::end);
                    std::streampos fileSize = ifs.tellg();
@@ -132,7 +155,7 @@ std::pair<std::string, std::variant<std::string, std::vector<uint8_t>>> Parser::
                 }
                 else {
                    std::string errorStr{"Cannot read: "};
-                   errorStr += requestPath_;
+                   errorStr += pTarget;
 
                    return buildErrorRespnose(500, "Read error", errorStr);
                 }
@@ -142,12 +165,28 @@ std::pair<std::string, std::variant<std::string, std::vector<uint8_t>>> Parser::
              std::cout << "MimeType not found, considering it to be binary" << std::endl;
           }
        }
-       else {
-          std::string errorStr{"File: "};
-          errorStr += requestPath_;
-          errorStr += " was not found";
+       else if (std::filesystem::is_directory(pTarget)) {
+          namespace fs = std::filesystem;
 
-          return buildErrorRespnose(404, "File not found", errorStr);
+          std::vector<Resource> resources;
+          for (const fs::directory_entry& de : fs::directory_iterator(pTarget)) {
+             resources.emplace_back(
+                   fs::is_directory(de) ? de.path().filename().string() : de.path().stem().string(),
+                   de.path().relative_path().string(),
+                   fs::is_directory(de) ? 'd' : 'p'
+             );
+          }
+          std::sort(resources.begin(), resources.end());
+
+          std::string folderContents{};
+          for (const auto& resource : resources) {
+             folderContents.append(resource.asString().append(";"));
+          }
+          return std::make_pair(buildHeader(folderContents.length(), "text/plain"), folderContents);
+       }
+       else {
+          std::string errorStr = "Resource type of " + requestPath_ + " is not supported";
+          return buildErrorRespnose(400, "Resource type not supported", errorStr);
        }
     }
 
