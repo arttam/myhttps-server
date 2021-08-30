@@ -1,13 +1,15 @@
-#include "parser.h"
 #include <cstring>
 #include <fstream>
 #include <sstream>
 
+// parser
+#include "parser.h"
+
+// md4c MD parser
+#include "md4c-html.h"
+
 // debug
 #include <iostream>
-
-// maddy
-#include <maddy/parser.h>
 
 // extension => {mime_type:isText}
 const std::unordered_map<std::string, std::pair<const char*, bool>> MimeTypes{
@@ -52,82 +54,101 @@ std::pair<std::string, std::variant<std::string, std::vector<uint8_t>>> Parser::
     requestPath_ = std::string(request.first.c_str() + requestType_.length() + 1, spacePtr);
 
     if (requestType_ == "GET") {
-        requestPath_.insert(0, std::filesystem::current_path());
-        if (std::filesystem::exists(requestPath_) && std::filesystem::is_regular_file(requestPath_)) {
-            std::string extension = std::filesystem::path(requestPath_).extension();
-            if (const auto mimeIt = MimeTypes.find(extension); mimeIt != MimeTypes.end()) {
-                const auto [ext, typePair] = *mimeIt;
-                const auto [mimeType, isText] = typePair;
-                if (isText) {
-                    // If markdown - we'll use maddy parser
-                    if (ext == ".md") {
-                        if (std::ifstream ifs(requestPath_); ifs) {
-                           std::shared_ptr<maddy::ParserConfig> config = std::make_shared<maddy::ParserConfig>();
-                           config->isEmphasizedParserEnabled           = true; // default
-                           config->isHTMLWrappedInParagraph            = true; // default
+       requestPath_.insert(0, std::filesystem::current_path());
+       if (std::filesystem::exists(requestPath_) && std::filesystem::is_regular_file(requestPath_)) {
+          std::string extension = std::filesystem::path(requestPath_).extension();
+          if (const auto mimeIt = MimeTypes.find(extension); mimeIt != MimeTypes.end()) {
+             const auto [ext, typePair] = *mimeIt;
+             const auto [mimeType, isText] = typePair;
+             if (isText) {
+                // If markdown - we'll use md4c parser
+                if (ext == ".md") {
+                   if (std::ifstream ifs(requestPath_); ifs) {
+                      std::string htmlIn(
+                            (std::istreambuf_iterator<char>(ifs)),
+                            std::istreambuf_iterator<char>());
 
-                           std::shared_ptr<maddy::Parser> parser     = std::make_shared<maddy::Parser>(config);
-                           std::string                    htmlOutput = parser->Parse(ifs);
-                           
-                           return std::make_pair(buildHeader(htmlOutput.length(), "text/html"), htmlOutput);
-                        }
-                        else {
-                           std::string errorStr{"Cannot read: "};
-                           errorStr += requestPath_;
+                      // Paser flags, for now switching everything on GitHub behaviour
+                      unsigned parser_flags = MD_DIALECT_GITHUB; // See md4c.h:333 
 
-                           return buildErrorRespnose(404, "Not found", errorStr);
-                        }
-                    }
-                    else if (std::ifstream ifs(requestPath_); ifs) {
-                        std::string fileContents(
-                                (std::istreambuf_iterator<char>(ifs)),
-                                (std::istreambuf_iterator<char>()));
+                      // Render flags
+                      unsigned render_flags = MD_HTML_FLAG_DEBUG | MD_HTML_FLAG_SKIP_UTF8_BOM;
 
-                        return std::make_pair(buildHeader(fileContents.length(), mimeType), fileContents);
-                    }
-                    else {
-                        std::string errorStr{"Cannot read: "};
-                        errorStr += requestPath_;
-                        
-                        return buildErrorRespnose(404, "Not found", errorStr);
-                    }
+                      // Parse buffer
+                      char chBUF[ 8192 ];
+                      std::string htmlOutput{};
+
+                      int result = md_html(
+                            htmlIn.c_str(),  // MarkDown Source
+                            htmlIn.length(), // MarkDown Source lenght
+                            [](const char* chPtr, unsigned size, void* pv) {  // Callback which will be called on each chunk processed
+                                 reinterpret_cast<std::string*>(pv)->append(chPtr, size);
+                            },
+                            reinterpret_cast<void*>(&htmlOutput), // will be propagated back to above process_output() callback as void* pv
+                            parser_flags,                         // parser flags
+                            render_flags                          // render flags (MD_HTML_FLAG_xxxx) , just 4 of them
+                      );
+
+
+                      return std::make_pair(buildHeader(htmlOutput.length(), "text/html"), htmlOutput);
+                   }
+                   else {
+                      std::string errorStr{"Cannot read: "};
+                      errorStr += requestPath_;
+
+                      return buildErrorRespnose(404, "Not found", errorStr);
+                   }
+                }
+                else if (std::ifstream ifs(requestPath_); ifs) {
+                   std::string fileContents(
+                         (std::istreambuf_iterator<char>(ifs)),
+                         (std::istreambuf_iterator<char>()));
+
+                   return std::make_pair(buildHeader(fileContents.length(), mimeType), fileContents);
                 }
                 else {
-                    if (std::ifstream ifs(requestPath_, std::ios::in|std::ios::binary); ifs) {
-                        ifs.unsetf(std::ios::skipws); // Stop eating new lines
-                        ifs.seekg(0, std::ios::end);
-                        std::streampos fileSize = ifs.tellg();
-                        ifs.seekg(0, std::ios::beg);
+                   std::string errorStr{"Cannot read: "};
+                   errorStr += requestPath_;
 
-                        std::vector<uint8_t> buffer(fileSize);
-                        if (ifs.read(reinterpret_cast<char*>(buffer.data()), fileSize)) {
-                            std::cout << "Read successfully into vector " << buffer.size() << " bytes";
-                            return std::make_pair(buildHeader(buffer.size(), mimeType), buffer);
-                        }
-                        else {
-                            std::string errorStr{"Failed to read data into buffer"};
-                            return buildErrorRespnose(500, "Read error", errorStr);
-                        }
-                    }
-                    else {
-                        std::string errorStr{"Cannot read: "};
-                        errorStr += requestPath_;
-
-                        return buildErrorRespnose(500, "Read error", errorStr);
-                    }
+                   return buildErrorRespnose(404, "Not found", errorStr);
                 }
-            }
-            else {
-                std::cout << "MimeType not found, considering it to be binary" << std::endl;
-            }
-        }
-        else {
-            std::string errorStr{"File: "};
-            errorStr += requestPath_;
-            errorStr += " was not found";
+             }
+             else {
+                if (std::ifstream ifs(requestPath_, std::ios::in|std::ios::binary); ifs) {
+                   ifs.unsetf(std::ios::skipws); // Stop eating new lines
+                   ifs.seekg(0, std::ios::end);
+                   std::streampos fileSize = ifs.tellg();
+                   ifs.seekg(0, std::ios::beg);
 
-            return buildErrorRespnose(404, "File not found", errorStr);
-        }
+                   std::vector<uint8_t> buffer(fileSize);
+                   if (ifs.read(reinterpret_cast<char*>(buffer.data()), fileSize)) {
+                      std::cout << "Read successfully into vector " << buffer.size() << " bytes";
+                      return std::make_pair(buildHeader(buffer.size(), mimeType), buffer);
+                   }
+                   else {
+                      std::string errorStr{"Failed to read data into buffer"};
+                      return buildErrorRespnose(500, "Read error", errorStr);
+                   }
+                }
+                else {
+                   std::string errorStr{"Cannot read: "};
+                   errorStr += requestPath_;
+
+                   return buildErrorRespnose(500, "Read error", errorStr);
+                }
+             }
+          }
+          else {
+             std::cout << "MimeType not found, considering it to be binary" << std::endl;
+          }
+       }
+       else {
+          std::string errorStr{"File: "};
+          errorStr += requestPath_;
+          errorStr += " was not found";
+
+          return buildErrorRespnose(404, "File not found", errorStr);
+       }
     }
 
     return std::make_pair(buildHeader(0), std::vector<uint8_t>{});

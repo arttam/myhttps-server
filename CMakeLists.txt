@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 set (CMAKE_CXX_COMPILER /usr/bin/clang++)
+set (CMAKE_C_COMPILER /usr/bin/clang)
 
 project(my_https_server CXX)
 
@@ -7,7 +8,9 @@ set (CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 
-include_directories("maddy")
+add_subdirectory(md4c)
+
+include_directories("md4c")
 
 file(GLOB SOURCES
     src/helpers.cpp
@@ -16,4 +19,4 @@ file(GLOB SOURCES
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 17)
-target_link_libraries(${PROJECT_NAME} ssl crypto)
+target_link_libraries(${PROJECT_NAME} ssl crypto md4c-html)
