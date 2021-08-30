@@ -6,6 +6,9 @@
 // debug
 #include <iostream>
 
+// maddy
+#include <maddy/parser.h>
+
 // extension => {mime_type:isText}
 const std::unordered_map<std::string, std::pair<const char*, bool>> MimeTypes{
     {".htm", {"text/html", true}},
@@ -56,7 +59,26 @@ std::pair<std::string, std::variant<std::string, std::vector<uint8_t>>> Parser::
                 const auto [ext, typePair] = *mimeIt;
                 const auto [mimeType, isText] = typePair;
                 if (isText) {
-                    if (std::ifstream ifs(requestPath_); ifs) {
+                    // If markdown - we'll use maddy parser
+                    if (ext == ".md") {
+                        if (std::ifstream ifs(requestPath_); ifs) {
+                           std::shared_ptr<maddy::ParserConfig> config = std::make_shared<maddy::ParserConfig>();
+                           config->isEmphasizedParserEnabled           = true; // default
+                           config->isHTMLWrappedInParagraph            = true; // default
+
+                           std::shared_ptr<maddy::Parser> parser     = std::make_shared<maddy::Parser>(config);
+                           std::string                    htmlOutput = parser->Parse(ifs);
+                           
+                           return std::make_pair(buildHeader(htmlOutput.length(), "text/html"), htmlOutput);
+                        }
+                        else {
+                           std::string errorStr{"Cannot read: "};
+                           errorStr += requestPath_;
+
+                           return buildErrorRespnose(404, "Not found", errorStr);
+                        }
+                    }
+                    else if (std::ifstream ifs(requestPath_); ifs) {
                         std::string fileContents(
                                 (std::istreambuf_iterator<char>(ifs)),
                                 (std::istreambuf_iterator<char>()));
