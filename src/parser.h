@@ -22,10 +22,18 @@ public:
 
 private:
     // pair: header, body
-    std::pair<std::string, std::string> buildErrorRespnose(int errorCode, const std::string& errorStr, const std::string& message) const;
+    using TextResponse = std::pair<std::string, std::string>;
+    using ByteResponse = std::pair<std::string, std::vector<uint8_t>>;
+    TextResponse buildErrorRespnose(int errorCode, const std::string& errorStr, const std::string& message) const;
     std::string buildHeader(int contentLength, const std::string& contentType=std::string{"text/html"}, int code=200, const std::string& status=std::string{"OK"}) const;
 
     void beautifyCode(std::string& payload) const;
+
+    // Helpers, in order to make code neat
+    TextResponse textFile(const std::filesystem::path& pTarget, const std::string& mimeType) const;
+    TextResponse MDFile(const std::filesystem::path& pTarget) const;
+
+    std::variant<ByteResponse, TextResponse> binaryFile(const std::filesystem::path& pTarget, const std::string& mimeType) const;
 };
 
 #endif

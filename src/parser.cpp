@@ -10,6 +10,9 @@
 #include "resource.h"
 #include "parser.h"
 
+// MIME Types
+#include "MimeTypes.h"
+
 // C++ beautifier
 #include "ReservedWords.h"
 
@@ -18,33 +21,6 @@
 
 // debug
 #include <iostream>
-
-// extension => {mime_type:isText}
-const std::unordered_map<std::string, std::pair<const char*, bool>> MimeTypes{
-    {".htm", {"text/html", true}},
-    {".html", {"text/html", true}},
-    {".md", {"text/html", true}},
-    {".php", {"text/html", true}},
-    {".css", {"text/css", true}},
-    {".txt", {"text/plain", true}},
-    {".js", {"application/javascript", true}},
-    {".json", {"application/json", true}},
-    {".xml", {"application/xml", true}},
-    {".swf", {"application/x-shockwave-flash", false}},
-    {".wasm", {"application/wasm", false}},
-    {".flv", {"video/x-flv", false}},
-    {".png", {"image/png", false}},
-    {".jpe", {"image/jpeg", false}},
-    {".jpeg", {"image/jpeg", false}},
-    {".jpg", {"image/jpeg", false}},
-    {".gif", {"image/gif", false}},
-    {".bmp", {"image/bmp", false}},
-    {".ico", {"image/vnd.microsoft.icon", false}},
-    {".tiff", {"image/tiff", false}},
-    {".tif", {"image/tiff", false}},
-    {".svg", {"image/svg+xml", false}},
-    {".svgz", {"image/svg+xml", false}}};
-
 
 std::string urlDecode(const std::string target)
 {
@@ -103,11 +79,6 @@ std::string urlDecode(const std::string target)
 Parser::Parser(const std::string& docRoot)
     : docRoot_(docRoot)
 {
-   std::cout << "Varieties:"
-      << "\ncurrent_path: " << std::filesystem::current_path() 
-      << "\nrelative against current: " << std::filesystem::relative(std::filesystem::current_path())
-      << "\nrelative against docRoot: " << std::filesystem::relative(docRoot_)
-      << std::endl;
 }
 
 std::pair<std::string, std::variant<std::string, std::vector<uint8_t>>> Parser::parse(std::pair<std::string, std::string>&& request)
@@ -153,82 +124,23 @@ std::pair<std::string, std::variant<std::string, std::vector<uint8_t>>> Parser::
              if (isText) {
                 // If markdown - we'll use md4c parser
                 if (ext == ".md") {
-                   if (std::ifstream ifs(pTarget); ifs) {
-                      std::string htmlIn(
-                            (std::istreambuf_iterator<char>(ifs)),
-                            std::istreambuf_iterator<char>());
-
-                      // Paser flags, for now switching everything on GitHub behaviour
-                      unsigned parser_flags = MD_DIALECT_GITHUB; // See md4c.h:333 
-
-                      // Render flags
-                      unsigned render_flags = MD_HTML_FLAG_DEBUG | MD_HTML_FLAG_SKIP_UTF8_BOM;
-
-                      // Parse buffer
-                      std::string htmlOutput{};
-
-                      int result = md_html(
-                            htmlIn.c_str(),  // MarkDown Source
-                            htmlIn.length(), // MarkDown Source lenght
-                            [](const char* chPtr, unsigned size, void* pv) {  // Callback which will be called on each chunk processed
-                                 reinterpret_cast<std::string*>(pv)->append(chPtr, size);
-                            },
-                            reinterpret_cast<void*>(&htmlOutput), // will be propagated back to above process_output() callback as void* pv
-                            parser_flags,                         // parser flags
-                            render_flags                          // render flags (MD_HTML_FLAG_xxxx) , just 4 of them
-                      );
-                      beautifyCode(htmlOutput);
-
-                      return std::make_pair(buildHeader(htmlOutput.length(), "text/html"), htmlOutput);
-                   }
-                   else {
-                      std::string errorStr{"Cannot read: "};
-                      errorStr += pTarget;
-
-                      return buildErrorRespnose(404, "Not found", errorStr);
-                   }
+                   return MDFile(pTarget);
                 }
-                else if (std::ifstream ifs(pTarget); ifs) {
-                   std::string fileContents(
-                         (std::istreambuf_iterator<char>(ifs)),
-                         (std::istreambuf_iterator<char>()));
-
-                   return std::make_pair(buildHeader(fileContents.length(), mimeType), fileContents);
-                }
-                else {
-                   std::string errorStr{"Cannot read: "};
-                   errorStr += pTarget;
-
-                   return buildErrorRespnose(404, "Not found", errorStr);
-                }
+                return textFile(pTarget, mimeType);
              }
              else {
-                if (std::ifstream ifs(pTarget, std::ios::in|std::ios::binary); ifs) {
-                   ifs.unsetf(std::ios::skipws); // Stop eating new lines
-                   ifs.seekg(0, std::ios::end);
-                   std::streampos fileSize = ifs.tellg();
-                   ifs.seekg(0, std::ios::beg);
-
-                   std::vector<uint8_t> buffer(fileSize);
-                   if (ifs.read(reinterpret_cast<char*>(buffer.data()), fileSize)) {
-                      std::cout << "Read successfully into vector " << buffer.size() << " bytes";
-                      return std::make_pair(buildHeader(buffer.size(), mimeType), buffer);
-                   }
-                   else {
-                      std::string errorStr{"Failed to read data into buffer"};
-                      return buildErrorRespnose(500, "Read error", errorStr);
-                   }
+                auto binaryFileResult = binaryFile(pTarget, mimeType); 
+                if (std::holds_alternative<Parser::TextResponse>(binaryFileResult)) {
+                   return std::get<Parser::TextResponse>(binaryFileResult);
                 }
                 else {
-                   std::string errorStr{"Cannot read: "};
-                   errorStr += pTarget;
-
-                   return buildErrorRespnose(500, "Read error", errorStr);
+                   return std::get<Parser::ByteResponse>(binaryFileResult);
                 }
              }
           }
           else {
-             std::cout << "MimeType not found, considering it to be binary" << std::endl;
+             std::cout << "MimeType not found, considering it to be text" << std::endl;
+             return textFile(pTarget, "text/plain");
           }
        }
        else if (std::filesystem::is_directory(pTarget)) {
@@ -423,4 +335,80 @@ void Parser::beautifyCode(std::string& payload) const
 		// snippedTo must me amended if changes were done
 		snippetPos = payload.find(codeTagOpen, snippetTo);
 	}
+}
+
+Parser::TextResponse Parser::textFile(const std::filesystem::path& pTarget, const std::string& mimeType) const
+{
+   if (std::ifstream ifs(pTarget); ifs) {
+      std::string fileContents(
+            (std::istreambuf_iterator<char>(ifs)),
+            (std::istreambuf_iterator<char>()));
+
+      return std::make_pair(buildHeader(fileContents.length(), mimeType), fileContents);
+   }
+   std::string errorStr{"Cannot read: "};
+   errorStr += pTarget;
+
+   return buildErrorRespnose(404, "Not found", errorStr);
+}
+
+std::variant<Parser::ByteResponse, Parser::TextResponse> Parser::binaryFile(const std::filesystem::path& pTarget, const std::string& mimeType) const
+{
+   if (std::ifstream ifs(pTarget, std::ios::in|std::ios::binary); ifs) {
+      ifs.unsetf(std::ios::skipws); // Stop eating new lines
+      ifs.seekg(0, std::ios::end);
+      std::streampos fileSize = ifs.tellg();
+      ifs.seekg(0, std::ios::beg);
+
+      std::vector<uint8_t> buffer(fileSize);
+      if (ifs.read(reinterpret_cast<char*>(buffer.data()), fileSize)) {
+         std::cout << "Read successfully into vector " << buffer.size() << " bytes";
+         return std::make_pair(buildHeader(buffer.size(), mimeType), buffer);
+      }
+      else {
+         std::string errorStr{"Failed to read data into buffer"};
+         return buildErrorRespnose(500, "Read error", errorStr);
+      }
+   }
+   std::string errorStr{"Cannot read: "};
+   errorStr += pTarget;
+
+   return buildErrorRespnose(500, "Read error", errorStr);
+}
+
+Parser::TextResponse Parser::MDFile(const std::filesystem::path& pTarget) const
+{
+   if (std::ifstream ifs(pTarget); ifs) {
+      std::string htmlIn(
+            (std::istreambuf_iterator<char>(ifs)),
+            std::istreambuf_iterator<char>());
+
+      // Paser flags, for now switching everything on GitHub behaviour
+      unsigned parser_flags = MD_DIALECT_GITHUB; // See md4c.h:333 
+
+      // Render flags
+      unsigned render_flags = MD_HTML_FLAG_DEBUG | MD_HTML_FLAG_SKIP_UTF8_BOM;
+
+      // Parse buffer
+      std::string htmlOutput{};
+
+      int result = md_html(
+            htmlIn.c_str(),  // MarkDown Source
+            htmlIn.length(), // MarkDown Source lenght
+            [](const char* chPtr, unsigned size, void* pv) {  // Callback which will be called on each chunk processed
+            reinterpret_cast<std::string*>(pv)->append(chPtr, size);
+            },
+            reinterpret_cast<void*>(&htmlOutput), // will be propagated back to above process_output() callback as void* pv
+            parser_flags,                         // parser flags
+            render_flags                          // render flags (MD_HTML_FLAG_xxxx) , just 4 of them
+            );
+      beautifyCode(htmlOutput);
+
+      return std::make_pair(buildHeader(htmlOutput.length(), "text/html"), htmlOutput);
+   }
+   // Something wrong
+   std::string errorStr{"Cannot read: "};
+   errorStr += pTarget;
+
+   return buildErrorRespnose(404, "Not found", errorStr);
 }
