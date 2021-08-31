@@ -31,20 +31,21 @@ int main(int argc, char **argv)
     //     ├── miki.wasm
     //     └── pages/
 
-    std::string certRoot{"./"};
+    std::string siteRoot{"./"};
 
     // TODO: Do it nicely
+    // Site root must be ALWAYS normalized, i.e. end with '/'
     if (argc > 2) {
-        certRoot.assign(argv[2]);
-        if (certRoot[certRoot.length() - 1] != '/')
-           certRoot += '/';
+        siteRoot.assign(argv[2]);
+        if (siteRoot[siteRoot.length() - 1] != '/')
+           siteRoot += '/';
     }
 
     std::string certificatePath{"server-certificate.pem"};
     std::string privateKeyPath{"server-private-key.pem"};
 
-    certificatePath.insert(0, certRoot);
-    privateKeyPath.insert(0, certRoot);
+    certificatePath.insert(0, siteRoot);
+    privateKeyPath.insert(0, siteRoot);
 
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
     SSL_library_init();
@@ -78,7 +79,7 @@ int main(int argc, char **argv)
         try {
             std::pair<std::string, std::string> request = receive_http_message(connectionBio);
 
-            std::unique_ptr<Parser> pParser(new Parser(certRoot + "/html"));
+            std::unique_ptr<Parser> pParser(new Parser(siteRoot + "html"));
             const auto [success, data] = pParser->parse(std::move(request));
 
             // Response

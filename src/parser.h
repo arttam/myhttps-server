@@ -24,6 +24,8 @@ private:
     // pair: header, body
     std::pair<std::string, std::string> buildErrorRespnose(int errorCode, const std::string& errorStr, const std::string& message) const;
     std::string buildHeader(int contentLength, const std::string& contentType=std::string{"text/html"}, int code=200, const std::string& status=std::string{"OK"}) const;
+
+    void beautifyCode(std::string& payload) const;
 };
 
 #endif
