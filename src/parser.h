@@ -7,6 +7,7 @@
 #include <utility>
 #include <unordered_map>
 #include <variant>
+#include <optional>
 
 class Parser
 {
@@ -34,6 +35,12 @@ private:
     TextResponse MDFile(const std::filesystem::path& pTarget) const;
 
     std::variant<ByteResponse, TextResponse> binaryFile(const std::filesystem::path& pTarget, const std::string& mimeType) const;
+
+    // Editing site content
+    TextResponse EditResult(const std::string& requestPath, const std::string& requestBody) const;
+    std::optional<std::string> rmEntry(const std::string& path, const std::string&) const;
+    std::optional<std::string> addEntry(const std::string& path, const std::string& data) const;
+    std::optional<std::string> editEntry(const std::string& path, const std::string& data) const;
 };
 
 #endif

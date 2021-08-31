@@ -83,92 +83,97 @@ Parser::Parser(const std::string& docRoot)
 
 std::pair<std::string, std::variant<std::string, std::vector<uint8_t>>> Parser::parse(std::pair<std::string, std::string>&& request)
 {
-    bool parseResult{false};
-    // First line - request type
-    const char *spacePtr = strchr(request.first.c_str(), ' ');
-    requestType_ = std::string(request.first.c_str(), spacePtr);
+   bool parseResult{false};
+   // First line - request type
+   const char *spacePtr = strchr(request.first.c_str(), ' ');
+   requestType_ = std::string(request.first.c_str(), spacePtr);
 
-    spacePtr = strchr(++spacePtr, ' ');
-    requestPath_ = urlDecode(std::string(request.first.c_str() + requestType_.length() + 1, spacePtr));
+   spacePtr = strchr(++spacePtr, ' ');
+   requestPath_ = urlDecode(std::string(request.first.c_str() + requestType_.length() + 1, spacePtr));
 
-    // Validation
-    if (requestPath_.empty() || requestPath_[0] != '/' || requestPath_.find("..") != std::string::npos) {
-       std::string errorStr = "Invalid request: '" + requestPath_ + "'";
-       return buildErrorRespnose(400, "Invalid request", errorStr);
-    }
+   // Validation
+   if (requestPath_.empty() || requestPath_[0] != '/' || requestPath_.find("..") != std::string::npos) {
+      std::string errorStr = "Invalid request: '" + requestPath_ + "'";
+      return buildErrorRespnose(400, "Invalid request", errorStr);
+   }
 
-    if (requestPath_ == "/") {
-       requestPath_ = "/miki.html";
-    }
+   // Check if edit command
+   if (requestPath_.substr(0, 5) == "/muki") {
+      return EditResult(requestPath_, request.second);
+   }
 
-    std::filesystem::path pTarget(std::filesystem::relative(docRoot_));
-    pTarget += requestPath_;
+   if (requestPath_ == "/") {
+      requestPath_ = "/miki.html";
+   }
 
-    // Debug
-    std::cout 
-       << "\nDoc Root: " << docRoot_
-       << "\nPure request path: " << requestPath_ 
-       << "\nRelative request path: " << pTarget << std::endl;
+   // In case of edit - we would add '-raw' suffix to file name
+   // And would send it without MD generation
+   bool rawMDFile{false};
+   if (const auto rawPos = requestPath_.find("-raw", requestPath_.length() - 4, 4); rawPos != std::string::npos) {
+      rawMDFile = true;
+      requestPath_.erase(rawPos);
+   }
 
-    if (!std::filesystem::exists(pTarget)) {
-       std::string errorStr = "Resource: " + requestPath_ + " was not found";
-       return buildErrorRespnose(404, "File not found", errorStr);
-    }
+   std::filesystem::path pTarget(std::filesystem::relative(docRoot_));
+   pTarget += requestPath_;
 
-    if (requestType_ == "GET") {
-       if (std::filesystem::is_regular_file(pTarget)) {
-          std::string extension = std::filesystem::path(pTarget).extension();
-          if (const auto mimeIt = MimeTypes.find(extension); mimeIt != MimeTypes.end()) {
-             const auto [ext, typePair] = *mimeIt;
-             const auto [mimeType, isText] = typePair;
-             if (isText) {
-                // If markdown - we'll use md4c parser
-                if (ext == ".md") {
-                   return MDFile(pTarget);
-                }
-                return textFile(pTarget, mimeType);
-             }
-             else {
-                auto binaryFileResult = binaryFile(pTarget, mimeType); 
-                if (std::holds_alternative<Parser::TextResponse>(binaryFileResult)) {
-                   return std::get<Parser::TextResponse>(binaryFileResult);
-                }
-                else {
-                   return std::get<Parser::ByteResponse>(binaryFileResult);
-                }
-             }
-          }
-          else {
-             std::cout << "MimeType not found, considering it to be text" << std::endl;
-             return textFile(pTarget, "text/plain");
-          }
-       }
-       else if (std::filesystem::is_directory(pTarget)) {
-          namespace fs = std::filesystem;
+   if (!std::filesystem::exists(pTarget)) {
+      std::string errorStr = "Resource: " + requestPath_ + " was not found";
+      return buildErrorRespnose(404, "File not found", errorStr);
+   }
 
-          std::vector<Resource> resources;
-          for (const fs::directory_entry& de : fs::directory_iterator(pTarget)) {
-             resources.emplace_back(
-                   fs::is_directory(de) ? de.path().filename().string() : de.path().stem().string(),
-                   std::filesystem::relative(de, docRoot_).string(),
-                   fs::is_directory(de) ? 'd' : 'p'
-             );
-          }
-          std::sort(resources.begin(), resources.end());
+   if (std::filesystem::is_regular_file(pTarget)) {
+      std::string extension = std::filesystem::path(pTarget).extension();
+      if (const auto mimeIt = MimeTypes.find(extension); mimeIt != MimeTypes.end()) {
+         const auto [ext, typePair] = *mimeIt;
+         const auto [mimeType, isText] = typePair;
+         if (isText) {
+            // If markdown - we'll use md4c parser
+            if (ext == ".md" && !rawMDFile) {
+               return MDFile(pTarget);
+            }
+            return textFile(pTarget, mimeType);
+         }
+         else {
+            auto binaryFileResult = binaryFile(pTarget, mimeType); 
+            if (std::holds_alternative<Parser::TextResponse>(binaryFileResult)) {
+               return std::get<Parser::TextResponse>(binaryFileResult);
+            }
+            else {
+               return std::get<Parser::ByteResponse>(binaryFileResult);
+            }
+         }
+      }
+      else {
+         std::cout << "MimeType not found, considering it to be text" << std::endl;
+         return textFile(pTarget, "text/plain");
+      }
+   }
+   else if (std::filesystem::is_directory(pTarget)) {
+      namespace fs = std::filesystem;
 
-          std::string folderContents{};
-          for (const auto& resource : resources) {
-             folderContents.append(resource.asString().append(";"));
-          }
-          return std::make_pair(buildHeader(folderContents.length(), "text/plain"), folderContents);
-       }
-       else {
-          std::string errorStr = "Resource type of " + requestPath_ + " is not supported";
-          return buildErrorRespnose(400, "Resource type not supported", errorStr);
-       }
-    }
+      std::vector<Resource> resources;
+      for (const fs::directory_entry& de : fs::directory_iterator(pTarget)) {
+         resources.emplace_back(
+               fs::is_directory(de) ? de.path().filename().string() : de.path().stem().string(),
+               std::filesystem::relative(de, docRoot_).string(),
+               fs::is_directory(de) ? 'd' : 'p'
+               );
+      }
+      std::sort(resources.begin(), resources.end());
 
-    return std::make_pair(buildHeader(0), std::vector<uint8_t>{});
+      std::string folderContents{};
+      for (const auto& resource : resources) {
+         folderContents.append(resource.asString().append(";"));
+      }
+      return std::make_pair(buildHeader(folderContents.length(), "text/plain"), folderContents);
+   }
+   else {
+      std::string errorStr = "Resource type of " + requestPath_ + " is not supported";
+      return buildErrorRespnose(400, "Resource type not supported", errorStr);
+   }
+
+   return std::make_pair(buildHeader(0), std::vector<uint8_t>{});
 }
 
 std::pair<std::string, std::string> Parser::buildErrorRespnose(int errorCode, const std::string& errorStr, const std::string& message) const
@@ -411,4 +416,157 @@ Parser::TextResponse Parser::MDFile(const std::filesystem::path& pTarget) const
    errorStr += pTarget;
 
    return buildErrorRespnose(404, "Not found", errorStr);
+}
+
+Parser::TextResponse Parser::EditResult(const std::string& requestPath, const std::string& requestBody) const
+{
+   // disassembling command
+   if (std::count(requestPath.begin(), requestPath.end(), '/') < 3) {
+      std::string errorText{"ERROR: Command does not have enough parameters"};
+      return buildErrorRespnose(500, "Edit Failed", errorText);
+   }
+   std::string editCommand{requestPath};
+
+   // removing /muki/
+   editCommand.erase(0, 6);
+   const auto        commandEnd = editCommand.find_first_of("/");
+   const std::string command    = editCommand.substr(0, commandEnd);
+   const std::string targetPath = editCommand.substr(commandEnd);
+   const std::string payload    = requestBody;
+
+   using commandHelper = std::optional<std::string> (Parser::*)(const std::string&, const std::string&) const;
+   const std::map<const std::string, commandHelper> commandsMap {
+        {"add", &Parser::addEntry}
+      , {"rm", &Parser::rmEntry}
+      , {"edit", &Parser::editEntry}
+   };
+
+   if (const auto cmdIt = commandsMap.find(command); cmdIt == commandsMap.end()) {
+      // Report error
+      std::string errorText{"ERROR: Command : '"};
+      errorText.append(command).append("' not supported");
+      return buildErrorRespnose(500, "Edit Failed", errorText);
+   }
+   else {
+      const auto commandResult = std::invoke(cmdIt->second, this, targetPath, payload);
+      if (commandResult.has_value()) {
+         std::string errorStr{"Error occurred whilst executing: "};
+         errorStr.append(command).append(", Message: ").append(*commandResult);
+
+         return buildErrorRespnose(500, "Edit Failed", errorStr);
+      }
+      else {
+         std::string okStr{"ok"};
+         return std::make_pair(buildHeader(okStr.length(), "text/html"), okStr);
+      }
+   }
+
+   return buildErrorRespnose(500, "Not implemented yet", "");
+}
+
+std::optional<std::string> Parser::rmEntry(const std::string& path, const std::string&) const
+{
+	// Remove entry, if not exists - return error
+   std::filesystem::path pTarget(std::filesystem::relative(docRoot_));
+   pTarget += path;
+
+	if (std::filesystem::exists(pTarget)) {
+		std::error_code ec;
+		if (!std::filesystem::remove(pTarget, ec)) {
+         std::stringstream sstr;
+         sstr 
+            << "Failed to remove '"
+            << path
+            << "', error message: '"
+            << ec.message()
+            << "'";
+
+         return sstr.str();
+		}
+	}
+	else {
+      std::stringstream sstr;
+      sstr 
+         << "Remove candidate '"
+         << path
+         << "' not found";
+
+      return sstr.str();
+	}
+
+	return {};
+}
+
+std::optional<std::string> Parser::addEntry(const std::string& path, const std::string& data) const
+{
+	// Add entry, if wrong path - return error
+   std::filesystem::path pTarget(std::filesystem::relative(docRoot_));
+   pTarget += path;
+
+	std::filesystem::path pTargetDirectory = pTarget;
+	pTargetDirectory.remove_filename();
+
+	std::error_code ec;
+	if (!std::filesystem::create_directories(pTargetDirectory, ec) && ec.value() != 0) {
+      std::stringstream sstr;
+      sstr 
+         << "Failed create destination directory '"
+         << pTarget.string()
+         << "', error message: '"
+         << ec.message()
+         << "'";
+
+      return sstr.str();
+	}
+
+	std::ofstream addedEntry(pTarget.string(), std::ios::out);
+	if (!addedEntry) {
+      std::stringstream sstr;
+      sstr 
+         << "Failed to open '"
+         << pTarget.string()
+         << "' for writting";
+
+      return sstr.str();
+	}
+
+	addedEntry.write(data.c_str(), data.length());
+	addedEntry.flush();
+	addedEntry.close();
+
+	return {};
+}
+
+std::optional<std::string> Parser::editEntry(const std::string& path, const std::string& data) const
+{
+	// Replace entry, if wrong path - return error
+   std::filesystem::path pTarget(std::filesystem::relative(docRoot_));
+   pTarget += path;
+
+	if (!std::filesystem::exists(pTarget)) {
+      std::stringstream sstr;
+      sstr 
+         << "Failed to find '"
+         << pTarget.string()
+         << "' for editing";
+
+      return sstr.str();
+	}
+
+	std::ofstream edittedEntry(pTarget, std::ios::out | std::ios::trunc);
+	if (!edittedEntry) {
+      std::stringstream sstr;
+      sstr
+         << "Failed to open '"
+         << pTarget.string()
+         << "' for writting";
+
+      return sstr.str();
+	}
+
+	edittedEntry.write(data.c_str(), data.length());
+	edittedEntry.flush();
+	edittedEntry.close();
+
+	return {};
 }
